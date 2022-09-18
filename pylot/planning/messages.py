@@ -14,9 +14,11 @@ class WaypointsMessage(erdos.Message):
     def __init__(self,
                  timestamp: erdos.Timestamp,
                  waypoints,
+                 obstacles,
                  agent_state=None):
         super(WaypointsMessage, self).__init__(timestamp, None)
         self.waypoints = waypoints
+        self.obstacles = obstacles
         self.agent_state = agent_state
 
     def __repr__(self):

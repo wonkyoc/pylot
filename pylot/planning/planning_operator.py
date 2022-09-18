@@ -211,7 +211,10 @@ class PlanningOperator(erdos.Operator):
             self._logger.debug('@{}: speed factor: {}'.format(
                 timestamp, speed_factor))
             output_wps.apply_speed_factor(speed_factor)
-        waypoints_stream.send(WaypointsMessage(timestamp, output_wps))
+
+        # use obstacles info for upstream
+        obstacles = self._world.get_obstacle_list()
+        waypoints_stream.send(WaypointsMessage(timestamp, output_wps, obstacles))
 
     def get_predictions(self, prediction_msg, ego_transform):
         predictions = []

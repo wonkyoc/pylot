@@ -30,9 +30,12 @@ class EfficientDetOperator(erdos.Operator):
         flags (absl.flags): Object to be used to access absl flags.
     """
     def __init__(self, camera_stream: erdos.ReadStream,
-                 obstacles_stream: erdos.WriteStream, model_names, model_paths,
+            abstraction_stream: erdos.ReadStream,
+            obstacles_stream: erdos.WriteStream,
+            model_names, model_paths,
                  flags):
         camera_stream.add_callback(self.on_msg_camera_stream)
+        abstraction_stream.add_callback(self.on_msg_abstraction_stream)
         erdos.add_watermark_callback([camera_stream], [obstacles_stream],
                                      self.on_watermark)
         self._flags = flags
@@ -70,6 +73,7 @@ class EfficientDetOperator(erdos.Operator):
         self._unique_id = 0
         self._frame_msgs = deque()
         self._ttd_msgs = deque()
+        self._abs_msgs = deque()
         self._last_ttd = 400
 
     def load_serving_model(self, model_name, model_path, gpu_memory_fraction):
@@ -89,7 +93,7 @@ class EfficientDetOperator(erdos.Operator):
             config=tf.compat.v1.ConfigProto(gpu_options=gpu_options))
 
     @staticmethod
-    def connect(camera_stream: erdos.ReadStream):
+    def connect(camera_stream: erdos.ReadStream, abstraction_stream: erdos.ReadStream):
         """Connects the operator to other streams.
 
         Args:
@@ -153,6 +157,12 @@ class EfficientDetOperator(erdos.Operator):
         self._logger.debug('@{}: {} received ttd update {}'.format(
             msg.timestamp, self.config.name, msg))
         self._ttd_msgs.append(msg)
+
+    @erdos.profile_method()
+    def on_msg_abstraction_stream(self, msg: erdos.Message):
+        self._logger.debug('@{}: {} received abs update {}'.format(
+            msg.timestamp, self.config.name, msg))
+        self._abs_msgs.append(msg)
 
     @erdos.profile_method()
     def on_msg_camera_stream(self, msg: erdos.Message):

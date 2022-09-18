@@ -26,6 +26,7 @@ def add_simulator_bridge(control_stream, sensor_ready_stream,
 
 def add_efficientdet_obstacle_detection(camera_stream,
                                         time_to_decision_stream,
+                                        abstraction_stream,
                                         csv_file_name=None):
     """Adds an operator that uses EfficientDet for obstacle detection."""
     from pylot.perception.detection.efficientdet_operator import \
@@ -38,7 +39,7 @@ def add_efficientdet_obstacle_detection(camera_stream,
                                      csv_log_file_name=csv_file_name,
                                      profile_file_name=FLAGS.profile_file_name)
     obstacles_streams = erdos.connect(EfficientDetOperator, op_config,
-                                      [camera_stream],
+                                      [camera_stream, abstraction_stream],
                                       FLAGS.obstacle_detection_model_names,
                                       FLAGS.obstacle_detection_model_paths,
                                       FLAGS)
@@ -953,3 +954,14 @@ def add_time_to_decision(pose_stream, obstacles_stream):
     [time_to_decision] = erdos.connect(TimeToDecisionOperator, op_config,
                                        [pose_stream, obstacles_stream], FLAGS)
     return time_to_decision
+
+
+def add_abstraction(waypoints_stream):
+    from pylot.abstraction.abstraction_operator import AbstractionOperator
+    op_config = erdos.OperatorConfig(name='abstraction_operator',
+                                     log_file_name=FLAGS.log_file_name,
+                                     csv_log_file_name=FLAGS.csv_log_file_name,
+                                     profile_file_name=FLAGS.profile_file_name)
+    [abstraction_stream] = erdos.connect(AbstractionOperator, op_config,
+                                     [waypoints_stream], FLAGS)
+    return abstraction_stream

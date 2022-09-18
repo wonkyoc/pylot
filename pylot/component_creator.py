@@ -20,7 +20,8 @@ def add_obstacle_detection(center_camera_stream,
                            ground_obstacles_stream=None,
                            ground_speed_limit_signs_stream=None,
                            ground_stop_signs_stream=None,
-                           time_to_decision_stream=None):
+                           time_to_decision_stream=None,
+                           abstraction_stream=None):
     """Adds operators for obstacle detection to the data-flow.
 
     If the `--perfect_obstacle_detection` flag is set, the method adds a
@@ -72,7 +73,8 @@ def add_obstacle_detection(center_camera_stream,
             logger.debug('Using EfficientDet obstacle detector...')
             obstacles_streams = pylot.operator_creator.\
                 add_efficientdet_obstacle_detection(
-                    center_camera_stream, time_to_decision_stream)
+                    center_camera_stream, time_to_decision_stream,
+                    abstraction_stream)
             obstacles_stream_wo_depth = obstacles_streams[0]
         else:
             logger.debug('Using obstacle detector...')
@@ -609,3 +611,9 @@ def add_evaluation(vehicle_id_stream, pose_stream, imu_stream):
         pylot.operator_creator.add_eval_metric_logging(
             collision_stream, lane_invasion_stream,
             traffic_light_invasion_stream, imu_stream, pose_stream)
+
+def add_backward(waypoints_stream):
+    logger.debug('Adding abstraction stream...')
+    abstraction_stream = pylot.operator_creator.add_abstraction(waypoints_stream)
+    return abstraction_stream
+

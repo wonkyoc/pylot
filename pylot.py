@@ -25,6 +25,7 @@ def driver():
                                       pylot.utils.Rotation(pitch=-15))
     streams_to_send_top_on = []
     control_loop_stream = erdos.LoopStream()
+    abstraction_loop_stream = erdos.LoopStream()
     time_to_decision_loop_stream = erdos.LoopStream()
     if FLAGS.simulator_mode == 'pseudo-asynchronous':
         release_sensor_stream = erdos.LoopStream()
@@ -125,7 +126,8 @@ def driver():
             center_camera_stream, center_camera_setup, pose_stream,
             depth_stream, depth_camera_stream, ground_segmented_stream,
             ground_obstacles_stream, ground_speed_limit_signs_stream,
-            ground_stop_signs_stream, time_to_decision_loop_stream)
+            ground_stop_signs_stream, time_to_decision_loop_stream,
+            abstraction_loop_stream)
     tl_transform = pylot.utils.Transform(CENTER_CAMERA_LOCATION,
                                          pylot.utils.Rotation())
     traffic_lights_stream, tl_camera_stream = \
@@ -176,6 +178,10 @@ def driver():
         lane_detection_stream, open_drive_stream, global_trajectory_stream,
         time_to_decision_loop_stream)
 
+    # Abstraction layer
+    abstraction_stream = pylot.component_creator.add_backward(waypoints_stream)
+    abstraction_loop_stream.set(abstraction_stream)
+
     if FLAGS.simulator_mode == "pseudo-asynchronous":
         # Add a synchronizer in the pseudo-asynchronous mode.
         (
@@ -191,6 +197,7 @@ def driver():
     else:
         waypoints_stream_for_control = waypoints_stream
         pose_stream_for_control = pose_stream
+
 
     control_stream = pylot.component_creator.add_control(
         pose_stream_for_control, waypoints_stream_for_control,
