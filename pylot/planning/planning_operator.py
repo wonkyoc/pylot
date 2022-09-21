@@ -184,7 +184,8 @@ class PlanningOperator(erdos.Operator):
         self._logger.debug('@{}: received watermark'.format(timestamp))
         if timestamp.is_top:
             return
-        self.update_world(timestamp)
+        
+        predictions = self.update_world(timestamp)
         if len(self._ttd_msgs) > 0:
             ttd_msg = self._ttd_msgs.popleft()
             # Total ttd - time spent up to now
@@ -213,7 +214,7 @@ class PlanningOperator(erdos.Operator):
             output_wps.apply_speed_factor(speed_factor)
 
         # use obstacles info for upstream
-        obstacles = self._world.get_obstacle_list()
+        obstacles = [pred.obstacle_trajectory.obstacle for pred in predictions]
         waypoints_stream.send(WaypointsMessage(timestamp, output_wps, obstacles))
 
     def get_predictions(self, prediction_msg, ego_transform):
@@ -252,3 +253,4 @@ class PlanningOperator(erdos.Operator):
                            static_obstacles_msg.obstacles,
                            hd_map=self._map,
                            lanes=lanes)
+        return predictions

@@ -47,4 +47,6 @@ class AbstractionOperator(erdos.Operator):
     def update_obstacles(self, msg: Message, 
             abstraction_stream: WriteStream):
         obstacles = msg.obstacles
-        abstraction_stream.send(HintMessage(msg.timestamp, obstacles))
+
+        if len(obstacles) > 0:
+            abstraction_stream.send(HintMessage(msg.timestamp, obstacles))

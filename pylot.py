@@ -179,8 +179,9 @@ def driver():
         time_to_decision_loop_stream)
 
     # Abstraction layer
-    abstraction_stream = pylot.component_creator.add_backward(waypoints_stream)
-    abstraction_loop_stream.set(abstraction_stream)
+    if FLAGS.yolox_detection_operator:
+        abstraction_stream = pylot.component_creator.add_backward(waypoints_stream)
+        abstraction_loop_stream.set(abstraction_stream)
 
     if FLAGS.simulator_mode == "pseudo-asynchronous":
         # Add a synchronizer in the pseudo-asynchronous mode.

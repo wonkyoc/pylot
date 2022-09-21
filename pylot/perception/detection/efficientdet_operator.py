@@ -12,6 +12,11 @@ from pylot.perception.detection.utils import BoundingBox2D, \
 from pylot.perception.messages import ObstaclesMessage
 
 import tensorflow as tf
+import torch
+from yolox.data.data_augment import ValTransform
+from yolox.exp import get_exp
+from yolox.utils import get_model_info, postprocess
+from PIL import Image
 
 
 class EfficientDetOperator(erdos.Operator):
@@ -48,6 +53,8 @@ class EfficientDetOperator(erdos.Operator):
         self._coco_labels = load_coco_labels(self._flags.path_coco_labels)
         self._bbox_colors = load_coco_bbox_colors(self._coco_labels)
 
+        self._model_names = model_names
+
         assert len(model_names) == len(
             model_paths), 'Model names and paths do not have same length'
         self._models = {}
@@ -59,22 +66,49 @@ class EfficientDetOperator(erdos.Operator):
         }
         for index, model_path in enumerate(model_paths):
             model_name = model_names[index]
-            self._models[model_name] = self.load_serving_model(
-                model_name, model_path,
-                flags.obstacle_detection_gpu_memory_fraction)
-            if index == 0:
-                # Use the first model by default.
-                self._model_name, self._tf_session = self._models[model_name]
-                # Serve some junk image to load up the model.
-                inputs = np.zeros((108, 192, 3))
-                self._tf_session.run(
-                    self._signitures['prediction'],
-                    feed_dict={self._signitures['image_arrays']: [inputs]})[0]
+            if 'efficientdet' in model_name:
+                self._models[model_name] = self.load_serving_model(
+                    model_name, model_path,
+                    flags.obstacle_detection_gpu_memory_fraction)
+                if index == 0:
+                    # Use the first model by default.
+                    self._model_name, self._tf_session = self._models[model_name]
+                    # Serve some junk image to load up the model.
+                    inputs = np.zeros((108, 192, 3))
+                    self._tf_session.run(
+                        self._signitures['prediction'],
+                        feed_dict={self._signitures['image_arrays']: [inputs]})[0]
+            elif 'yolox' in model_name:
+                self._models[model_name] = self.load_yolox_model(model_name, model_path)
+                self._preproc = ValTransform(legacy=False)
+
         self._unique_id = 0
         self._frame_msgs = deque()
         self._ttd_msgs = deque()
         self._abs_msgs = deque()
         self._last_ttd = 400
+
+    
+    def load_yolox_model(self, model_name, model_path):
+        self._logger.debug("Loading YOLOX...")
+        exp_file = "pylot/perception/detection/exps/{}".format(model_name)
+        exp = get_exp(exp_file)
+
+        # YOLOX
+        self.num_classes = exp.num_classes
+        self.confthre = exp.test_conf = 0.3
+        self.nmsthre = exp.nmsthre = 0.45
+        self.test_size = exp.test_size = (128, 128)
+
+        model = exp.get_model()
+        self._logger.debug("Model Summary: {}".format(get_model_info(model, exp.test_size)))
+        model.cuda()
+        ckpt = torch.load(model_path, map_location="cpu")
+        # load the model state dict
+        model.load_state_dict(ckpt["model"])
+        model.eval()
+
+        return model
 
     def load_serving_model(self, model_name, model_path, gpu_memory_fraction):
         detection_graph = tf.Graph()
@@ -189,6 +223,14 @@ class EfficientDetOperator(erdos.Operator):
         if len(self._ttd_msgs) > 0:
             ttd_msg = self._ttd_msgs.popleft()
             self._last_ttd = ttd_msg.data
+
+        # this is a test code if the msg comes in the right place
+        obstacle_list = []
+        if len(self._abs_msgs) > 0:
+            abs_msg = self._abs_msgs.popleft()
+            #print(abs_msg)
+            obstacle_list = abs_msg.obstacles
+
         frame_msg = self._frame_msgs.popleft()
         self.update_model_choice(self._last_ttd)
         frame = frame_msg.frame
@@ -199,8 +241,59 @@ class EfficientDetOperator(erdos.Operator):
             feed_dict={self._signitures['image_arrays']: [inputs]})[0]
         detector_end_time = time.time()
         runtime = (detector_end_time - detector_start_time) * 1000
-        self._logger.debug("@{}: detector runtime {}".format(
+        self._logger.debug("@{}: efficientdet detector runtime {}".format(
             timestamp, runtime))
+
+        big_outputs_np = []
+        count = 0
+        # obstacle_list is the downstream knowledge
+        if len(obstacle_list) > 0:
+            # we only use one model among (m,l,x)
+            big_detector = self._model_names[1]
+            for obstacle in obstacle_list:
+                # run model for each area of obstacles
+                bbox = obstacle.bounding_box_2D
+                bbox = (bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max)
+                # ref: (left, top, right, bottom) == bbox
+                img = Image.fromarray(inputs).crop(bbox)
+                Image.fromarray(inputs).save("frames/{}-original-{}.jpg".format(timestamp, count))
+                img.save("frames/{}-cropped-{}.jpg".format(timestamp, count))
+                img = np.asarray(img)
+                img, _ = self._preproc(img, None, (128, 128))
+                img = torch.from_numpy(img).unsqueeze(0)
+                img = img.float()
+                img = img.cuda()
+
+                with torch.no_grad():
+                    big_detector_start_time = time.time()
+                    outputs = self._models[big_detector](img)
+                    outputs = postprocess(
+                        outputs, self.num_classes, self.confthre,
+                        self.nmsthre, class_agnostic=True
+                    )
+                    if outputs[0] != None:
+                        # detected objects
+                        preds = outputs[0]
+
+                        # padding for matching with tf results
+                        padding = torch.zeros([len(preds), 1]).cuda()
+
+                        # (0, bbox=(ymin, xmin, ymax, xmax), score, 
+                        big_outputs_np = torch.cat(
+                                (padding, 
+                                    preds[:, 1:2], preds[:, 0:1], preds[:, 3:4], preds[:, 2:3],
+                                    preds[:, 4:5] * preds[:, 5:6], preds[:, 6:7]), 1)
+                    big_detector_end_time = time.time()
+                    runtime = (big_detector_end_time - big_detector_start_time) * 1000
+                    self._logger.debug("@{}: {} detector runtime {}".format(
+                        timestamp, big_detector, runtime))
+                    count += 1
+
+        # merge results from efficientdet + yolox
+        if len(big_outputs_np) > 0:
+            big_outputs_np = big_outputs_np.tolist()
+            outputs_np += big_outputs_np
+
         obstacles = []
         camera_setup = frame.camera_setup
         for _, ymin, xmin, ymax, xmax, score, _class in outputs_np:
